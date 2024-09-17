@@ -1,59 +1,36 @@
-import pytest
-
-from mitmproxy.test import tflow
-from mitmproxy.test import taddons
-
-from mitmproxy import controller
+import asyncio
+import os
 import time
 
-from .. import tservers
+import pytest
+
+from mitmproxy.test import taddons
+from mitmproxy.test import tflow
 
 
-class Thing:
-    def __init__(self):
-        self.reply = controller.DummyReply()
-        self.live = True
-
-
-class TestConcurrent(tservers.MasterTest):
-    def test_concurrent(self, tdata):
+class TestConcurrent:
+    @pytest.mark.parametrize(
+        "addon", ["concurrent_decorator.py", "concurrent_decorator_class.py"]
+    )
+    async def test_concurrent(self, addon, tdata):
         with taddons.context() as tctx:
-            sc = tctx.script(
-                tdata.path(
-                    "mitmproxy/data/addonscripts/concurrent_decorator.py"
-                )
-            )
+            sc = tctx.script(tdata.path(f"mitmproxy/data/addonscripts/{addon}"))
             f1, f2 = tflow.tflow(), tflow.tflow()
-            tctx.cycle(sc, f1)
-            tctx.cycle(sc, f2)
             start = time.time()
-            while time.time() - start < 5:
-                if f1.reply.state == f2.reply.state == "committed":
-                    return
-            raise ValueError("Script never acked")
+            await asyncio.gather(
+                tctx.cycle(sc, f1),
+                tctx.cycle(sc, f2),
+            )
+            end = time.time()
+            # This test may fail on overloaded CI systems, increase upper bound if necessary.
+            if os.environ.get("CI"):
+                assert 0.5 <= end - start
+            else:
+                assert 0.5 <= end - start < 1
 
-    @pytest.mark.asyncio
-    async def test_concurrent_err(self, tdata):
+    def test_concurrent_err(self, tdata, caplog):
         with taddons.context() as tctx:
             tctx.script(
-                tdata.path(
-                    "mitmproxy/data/addonscripts/concurrent_decorator_err.py"
-                )
+                tdata.path("mitmproxy/data/addonscripts/concurrent_decorator_err.py")
             )
-            assert await tctx.master.await_log("decorator not supported")
-
-    def test_concurrent_class(self, tdata):
-            with taddons.context() as tctx:
-                sc = tctx.script(
-                    tdata.path(
-                        "mitmproxy/data/addonscripts/concurrent_decorator_class.py"
-                    )
-                )
-                f1, f2 = tflow.tflow(), tflow.tflow()
-                tctx.cycle(sc, f1)
-                tctx.cycle(sc, f2)
-                start = time.time()
-                while time.time() - start < 5:
-                    if f1.reply.state == f2.reply.state == "committed":
-                        return
-                raise ValueError("Script never acked")
+            assert "decorator not supported" in caplog.text

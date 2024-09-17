@@ -1,55 +1,62 @@
 # Release Checklist
 
-Make sure to run all these steps on the correct branch you want to create a new
-release for! The command examples assume that you have a git remote called
-`upstream` that points to the `mitmproxy/mitmproxy` repo.
+1. Check if `mitmproxy-rs` needs a new release.
+2. Make sure that `CHANGELOG.md` is up-to-date with all entries in the "Unreleased" section.
+3. Invoke the [release workflow](https://github.com/mitmproxy/mitmproxy/actions/workflows/release.yml) from the GitHub UI.
+4. The spawned workflow runs will require manual confirmation on GitHub which you need to approve twice: 
+   https://github.com/mitmproxy/mitmproxy/actions
+5. Once everything has been deployed, update the website.
+6. Verify that the front-page download links for all platforms are working.
 
-- Verify that `mitmproxy/version.py` is correct.
-- Update CHANGELOG.
-- Verify that all CI tests pass.
-- If needed, create a major version branch - e.g. `v4.x`. Assuming you have a remote repo called `upstream` that points to the mitmproxy/mitmproxy repo::
-  - `git checkout -b v4.x upstream/master`
-  - `git push -u upstream v4.x`
-- Tag the release and push to Github.
-    - `git tag v4.0.0`
-    - `git push upstream v4.0.0`
-- Wait for tag CI to complete.
+### GitHub Releases
 
-## GitHub Release
-- Create release notice on Github
-  [here](https://github.com/mitmproxy/mitmproxy/releases/new) if not already
-  auto-created by the tag.
-- We DO NOT upload release artifacts to GitHub anymore. Simply add the
-  following snippet to the notice:
-  `You can find the latest release packages at https://mitmproxy.org/downloads/.`
+- CI will automatically create a GitHub release:  
+  https://github.com/mitmproxy/mitmproxy/releases
 
-## PyPi
-- The created wheel is uploaded to PyPi automatically.
-- Please check https://pypi.python.org/pypi/mitmproxy about the latest version.
+### PyPi
 
-## Homebrew
+- CI will automatically push a wheel to GitHub:  
+  https://pypi.python.org/pypi/mitmproxy
+
+### Docker
+
+- CI will automatically push images to Docker Hub:  
+  https://hub.docker.com/r/mitmproxy/mitmproxy/tags/
+
+### Docs
+
+- CI will automatically update the stable docs and create an archive version:  
+  `https://docs.mitmproxy.org/archive/vMAJOR/`
+
+### Download Server
+
+- CI will automatically push binaries to our download S3 bucket:  
+  https://mitmproxy.org/downloads/
+
+### Microsoft Store
+
+- CI will automatically update the Microsoft Store version:  
+  https://apps.microsoft.com/store/detail/mitmproxy/9NWNDLQMNZD7
+- There is a review process, binaries may take a day to show up.
+
+### Homebrew
+
 - The Homebrew maintainers are typically very fast and detect our new relese
   within a day.
 - If you feel the need, you can run this from a macOS machine:
-  `brew bump-formula-pr --url https://github.com/mitmproxy/mitmproxy/archive/v<version number here>`
+  `brew bump-cask-pr mitmproxy`
 
-## Docker
-- The docker image is built on Travis and pushed to Docker Hub automatically.
-- Please check https://hub.docker.com/r/mitmproxy/mitmproxy/tags/ about the latest version.
-- Update `latest` tag: `export VERSION=4.0.3 && docker pull mitmproxy/mitmproxy:$VERSION && docker tag mitmproxy/mitmproxy:$VERSION mitmproxy/mitmproxy:latest && docker push mitmproxy/mitmproxy:latest`.
+### Website
 
-## Website
- - Update version here:
-   https://github.com/mitmproxy/www/blob/master/src/config.toml
- - Run `./build && ./upload-test`.
- - If everything looks alright at http://www-test.mitmproxy.org, run `./upload-prod`.
+- The website does not need to be updated for patch releases. New versions are automatically picked up once they are on the download server.
+- Update version here:
+   https://github.com/mitmproxy/www/blob/main/src/config.toml
+- Update docs menu here:
+   https://github.com/mitmproxy/www/blob/main/src/themes/mitmproxy/layouts/partials/header.html
+- Run `./build && ./upload-test`.
+- If everything looks alright at https://www-test.mitmproxy.org, run `./upload-prod`.
 
-## Docs
-  - Make sure you've uploaded the previous version's docs to archive
-  - If everything looks alright:
-    - `./build-current`
-    - `./upload-stable`
+### Prepare for next release
 
-## Prepare for next release
- - Last but not least, bump the version on master in
-   [https://github.com/mitmproxy/mitmproxy/blob/master/mitmproxy/version.py](mitmproxy/version.py) for major releases.
+- Last but not least, bump the major version on main in
+   [https://github.com/mitmproxy/mitmproxy/blob/main/mitmproxy/version.py](mitmproxy/version.py) and add a `.dev` suffix.

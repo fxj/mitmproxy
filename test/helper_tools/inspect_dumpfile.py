@@ -1,8 +1,9 @@
+#!/usr/bin/env python3
 from pprint import pprint
 
 import click
 
-from mitmproxy import tnetstring
+from mitmproxy.io import tnetstring
 
 
 def read_tnetstring(input):
@@ -17,7 +18,7 @@ def read_tnetstring(input):
 
 
 @click.command()
-@click.argument("input", type=click.File('rb'))
+@click.argument("input", type=click.File("rb"))
 def inspect(input):
     """
     pretty-print a dumpfile

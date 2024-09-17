@@ -1,13 +1,13 @@
 import urllib
+
 import pytest
 
-from mitmproxy.test import taddons
-from mitmproxy.test import tflow
-
 import mitmproxy.test.tutils
-from mitmproxy.addons import serverplayback
 from mitmproxy import exceptions
 from mitmproxy import io
+from mitmproxy.addons import serverplayback
+from mitmproxy.test import taddons
+from mitmproxy.test import tflow
 
 
 def tdump(path, flows):
@@ -55,6 +55,27 @@ def test_server_playback():
         sp.load_flows([f])
         assert sp.flowmap
         sp.clear()
+        assert not sp.flowmap
+
+
+def test_add_flows():
+    sp = serverplayback.ServerPlayback()
+    with taddons.context(sp) as tctx:
+        tctx.configure(sp)
+        f1 = tflow.tflow(resp=True)
+        f2 = tflow.tflow(resp=True)
+
+        sp.load_flows([f1])
+        sp.add_flows([f2])
+
+        assert sp.next_flow(f1)
+        assert sp.flowmap
+        assert sp.next_flow(f2)
+        assert not sp.flowmap
+
+        sp.add_flows([f1])
+        assert sp.flowmap
+        assert sp.next_flow(f1)
         assert not sp.flowmap
 
 
@@ -107,9 +128,7 @@ def test_ignore_content_wins_over_params():
         tctx.configure(
             s,
             server_replay_ignore_content=True,
-            server_replay_ignore_payload_params=[
-                "param1", "param2"
-            ]
+            server_replay_ignore_payload_params=["param1", "param2"],
         )
 
         # NOTE: parameters are mutually exclusive in options
@@ -131,9 +150,7 @@ def test_ignore_payload_params_other_content_type():
         tctx.configure(
             s,
             server_replay_ignore_content=False,
-            server_replay_ignore_payload_params=[
-                "param1", "param2"
-            ]
+            server_replay_ignore_payload_params=["param1", "param2"],
         )
 
         r = tflow.tflow(resp=True)
@@ -215,10 +232,10 @@ def test_load():
         assert not s.next_flow(r)
 
 
-def test_load_with_server_replay_nopop():
+def test_load_with_server_replay_reuse():
     s = serverplayback.ServerPlayback()
     with taddons.context(s) as tctx:
-        tctx.configure(s, server_replay_nopop=True)
+        tctx.configure(s, server_replay_reuse=True)
 
         r = tflow.tflow(resp=True)
         r.request.headers["key"] = "one"
@@ -236,10 +253,7 @@ def test_load_with_server_replay_nopop():
 def test_ignore_params():
     s = serverplayback.ServerPlayback()
     with taddons.context(s) as tctx:
-        tctx.configure(
-            s,
-            server_replay_ignore_params=["param1", "param2"]
-        )
+        tctx.configure(s, server_replay_ignore_params=["param1", "param2"])
 
         r = tflow.tflow(resp=True)
         r.request.path = "/test?param1=1"
@@ -258,10 +272,7 @@ def thash(r, r2, setter):
     s = serverplayback.ServerPlayback()
     with taddons.context(s) as tctx:
         s = serverplayback.ServerPlayback()
-        tctx.configure(
-            s,
-            server_replay_ignore_payload_params=["param1", "param2"]
-        )
+        tctx.configure(s, server_replay_ignore_payload_params=["param1", "param2"])
 
         setter(r, paramx="x", param1="1")
 
@@ -296,24 +307,40 @@ def test_ignore_payload_params():
     r2.request.headers["Content-Type"] = "application/x-www-form-urlencoded"
     thash(r, r2, urlencode_setter)
 
-    boundary = 'somefancyboundary'
+    boundary = "somefancyboundary"
 
     def multipart_setter(r, **kwargs):
-        b = "--{0}\n".format(boundary)
+        b = f"--{boundary}\n"
         parts = []
         for k, v in kwargs.items():
             parts.append(
-                "Content-Disposition: form-data; name=\"%s\"\n\n"
-                "%s\n" % (k, v)
+                'Content-Disposition: form-data; name="%s"\n\n' "%s\n" % (k, v)
             )
         c = b + b.join(parts) + b
         r.request.content = c.encode()
-        r.request.headers["content-type"] = 'multipart/form-data; boundary=' +\
-            boundary
+        r.request.headers["content-type"] = "multipart/form-data; boundary=" + boundary
 
     r = tflow.tflow(resp=True)
     r2 = tflow.tflow(resp=True)
     thash(r, r2, multipart_setter)
+
+
+def test_runtime_modify_params():
+    s = serverplayback.ServerPlayback()
+    with taddons.context(s) as tctx:
+        r = tflow.tflow(resp=True)
+        r.request.path = "/test?param1=1"
+        r2 = tflow.tflow(resp=True)
+        r2.request.path = "/test"
+
+        s.load_flows([r])
+        hash = next(iter(s.flowmap.keys()))
+
+        tctx.configure(s, server_replay_ignore_params=["param1"])
+        hash_mod = next(iter(s.flowmap.keys()))
+
+        assert hash != hash_mod
+        assert hash_mod == s._hash(r2)
 
 
 def test_server_playback_full():
@@ -321,7 +348,7 @@ def test_server_playback_full():
     with taddons.context(s) as tctx:
         tctx.configure(
             s,
-            server_replay_refresh = True,
+            server_replay_refresh=True,
         )
 
         f = tflow.tflow()
@@ -331,7 +358,7 @@ def test_server_playback_full():
         tf = tflow.tflow()
         assert not tf.response
         s.request(tf)
-        assert tf.response == f.response
+        assert tf.response.data == f.response.data
 
         tf = tflow.tflow()
         tf.request.content = b"gibble"
@@ -340,14 +367,10 @@ def test_server_playback_full():
         assert not tf.response
 
 
-def test_server_playback_kill():
+async def test_server_playback_kill():
     s = serverplayback.ServerPlayback()
     with taddons.context(s) as tctx:
-        tctx.configure(
-            s,
-            server_replay_refresh = True,
-            server_replay_kill_extra=True
-        )
+        tctx.configure(s, server_replay_refresh=True, server_replay_kill_extra=True)
 
         f = tflow.tflow()
         f.response = mitmproxy.test.tutils.tresp(content=f.request.content)
@@ -355,5 +378,66 @@ def test_server_playback_kill():
 
         f = tflow.tflow()
         f.request.host = "nonexistent"
-        tctx.cycle(s, f)
-        assert f.reply.value == exceptions.Kill
+        await tctx.cycle(s, f)
+        assert f.error
+
+
+async def test_server_playback_kill_new_option():
+    s = serverplayback.ServerPlayback()
+    with taddons.context(s) as tctx:
+        tctx.configure(s, server_replay_refresh=True, server_replay_extra="kill")
+
+        f = tflow.tflow()
+        f.response = mitmproxy.test.tutils.tresp(content=f.request.content)
+        s.load_flows([f])
+
+        f = tflow.tflow()
+        f.request.host = "nonexistent"
+        await tctx.cycle(s, f)
+        assert f.error
+
+
+@pytest.mark.parametrize(
+    "option,status",
+    [
+        ("204", 204),
+        ("400", 400),
+        ("404", 404),
+        ("500", 500),
+    ],
+)
+async def test_server_playback_404(option, status):
+    s = serverplayback.ServerPlayback()
+    with taddons.context(s) as tctx:
+        tctx.configure(s, server_replay_refresh=True, server_replay_extra=option)
+
+        f = tflow.tflow()
+        f.response = mitmproxy.test.tutils.tresp(content=f.request.content)
+        s.load_flows([f])
+
+        f = tflow.tflow()
+        f.request.host = "nonexistent"
+        s.request(f)
+        assert f.response.status_code == status
+
+
+def test_server_playback_response_deleted():
+    """
+    The server playback addon holds references to flows that can be modified by the user in the meantime.
+    One thing that can happen is that users remove the response object. This happens for example when doing a client
+    replay at the same time.
+    """
+    sp = serverplayback.ServerPlayback()
+    with taddons.context(sp) as tctx:
+        tctx.configure(sp)
+        f1 = tflow.tflow(resp=True)
+        f2 = tflow.tflow(resp=True)
+
+        assert not sp.flowmap
+
+        sp.load_flows([f1, f2])
+        assert sp.flowmap
+
+        f1.response = f2.response = None
+        assert not sp.next_flow(f1)
+        assert not sp.flowmap

@@ -1,26 +1,20 @@
+import mitmproxy.types
 from mitmproxy.test.tflow import tflow
-from mitmproxy.tools.console import defaultkeys
-from mitmproxy.tools.console import keymap
-from mitmproxy.tools.console import master
-from mitmproxy import command
-
-import pytest
 
 
-@pytest.mark.asyncio
-async def test_commands_exist():
-    km = keymap.Keymap(None)
-    defaultkeys.map(km)
-    assert km.bindings
-    m = master.ConsoleMaster(None)
-    await m.load_flow(tflow())
+async def test_commands_exist(console):
+    await console.load_flow(tflow())
 
-    for binding in km.bindings:
-        cmd, *args = command.lexer(binding.command)
-        assert cmd in m.commands.commands
-
-        cmd_obj = m.commands.commands[cmd]
+    for binding in console.keymap.bindings:
         try:
+            parsed, _ = console.commands.parse_partial(binding.command.strip())
+
+            cmd = parsed[0].value
+            args = [a.value for a in parsed[1:] if a.type != mitmproxy.types.Space]
+
+            assert cmd in console.commands.commands
+
+            cmd_obj = console.commands.commands[cmd]
             cmd_obj.prepare_args(args)
         except Exception as e:
-            raise ValueError("Invalid command: {}".format(binding.command)) from e
+            raise ValueError(f"Invalid binding: {binding.command}") from e

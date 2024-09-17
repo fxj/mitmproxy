@@ -1,44 +1,89 @@
 from mitmproxy import contentviews
+from mitmproxy.http import Headers
+from mitmproxy.test import taddons
 from mitmproxy.test import tflow
 from mitmproxy.test import tutils
-from mitmproxy.test import taddons
-from mitmproxy.net.http import Headers
-
-from ..mitmproxy import tservers
 
 
-class TestScripts(tservers.MasterTest):
+class TestScripts:
     def test_add_header(self, tdata):
         with taddons.context() as tctx:
-            a = tctx.script(tdata.path("../examples/simple/add_header.py"))
-            f = tflow.tflow(resp=tutils.tresp())
-            a.response(f)
-            assert f.response.headers["newheader"] == "foo"
+            a = tctx.script(tdata.path("../examples/addons/anatomy2.py"))
+            f = tflow.tflow()
+            a.request(f)
+            assert f.request.headers["myheader"] == "value"
 
     def test_custom_contentviews(self, tdata):
         with taddons.context() as tctx:
-            tctx.script(tdata.path("../examples/simple/custom_contentview.py"))
+            tctx.script(tdata.path("../examples/addons/contentview.py"))
             swapcase = contentviews.get("swapcase")
             _, fmt = swapcase(b"<html>Test!</html>")
-            assert any(b'tEST!' in val[0][1] for val in fmt)
+            assert any(b"tEST!" in val[0][1] for val in fmt)
 
-    def test_iframe_injector(self, tdata):
+    def test_custom_grpc_contentview(self, tdata):
         with taddons.context() as tctx:
-            sc = tctx.script(tdata.path("../examples/simple/modify_body_inject_iframe.py"))
-            tctx.configure(
-                sc,
-                iframe = "http://example.org/evil_iframe"
+            tctx.script(tdata.path("../examples/addons/contentview-custom-grpc.py"))
+            v = contentviews.get("customized gRPC/protobuf")
+
+            p = tdata.path("mitmproxy/contentviews/test_grpc_data/msg1.bin")
+            with open(p, "rb") as f:
+                raw = f.read()
+
+            sim_msg_req = tutils.treq(
+                port=443, host="example.com", path="/ReverseGeocode"
             )
-            f = tflow.tflow(
-                resp=tutils.tresp(content=b"<html><body>mitmproxy</body></html>")
-            )
-            tctx.master.addons.invoke_addon(sc, "response", f)
-            content = f.response.content
-            assert b'iframe' in content and b'evil_iframe' in content
+
+            sim_msg_resp = tutils.tresp()
+
+            sim_flow = tflow.tflow(req=sim_msg_req, resp=sim_msg_resp)
+
+            view_text, output = v(
+                raw, flow=sim_flow, http_message=sim_flow.request
+            )  # simulate request message
+            assert view_text == "Protobuf (flattened) (addon with custom rules)"
+            output = list(output)  # assure list conversion if generator
+            assert output == [
+                [
+                    ("text", "[message]  "),
+                    ("text", "position   "),
+                    ("text", "1    "),
+                    ("text", "                               "),
+                ],
+                [
+                    ("text", "[double]   "),
+                    ("text", "latitude   "),
+                    ("text", "1.1  "),
+                    ("text", "38.89816675798073              "),
+                ],
+                [
+                    ("text", "[double]   "),
+                    ("text", "longitude  "),
+                    ("text", "1.2  "),
+                    ("text", "-77.03829828366696             "),
+                ],
+                [
+                    ("text", "[string]   "),
+                    ("text", "country    "),
+                    ("text", "3    "),
+                    ("text", "de_DE                          "),
+                ],
+                [
+                    ("text", "[uint32]   "),
+                    ("text", "           "),
+                    ("text", "6    "),
+                    ("text", "1                              "),
+                ],
+                [
+                    ("text", "[string]   "),
+                    ("text", "app        "),
+                    ("text", "7    "),
+                    ("text", "de.mcdonalds.mcdonaldsinfoapp  "),
+                ],
+            ]
 
     def test_modify_form(self, tdata):
         with taddons.context() as tctx:
-            sc = tctx.script(tdata.path("../examples/simple/modify_form.py"))
+            sc = tctx.script(tdata.path("../examples/addons/http-modify-form.py"))
 
             form_header = Headers(content_type="application/x-www-form-urlencoded")
             f = tflow.tflow(req=tutils.treq(headers=form_header))
@@ -52,7 +97,9 @@ class TestScripts(tservers.MasterTest):
 
     def test_modify_querystring(self, tdata):
         with taddons.context() as tctx:
-            sc = tctx.script(tdata.path("../examples/simple/modify_querystring.py"))
+            sc = tctx.script(
+                tdata.path("../examples/addons/http-modify-query-string.py")
+            )
             f = tflow.tflow(req=tutils.treq(path="/search?q=term"))
 
             sc.request(f)
@@ -64,36 +111,14 @@ class TestScripts(tservers.MasterTest):
 
     def test_redirect_requests(self, tdata):
         with taddons.context() as tctx:
-            sc = tctx.script(tdata.path("../examples/simple/redirect_requests.py"))
+            sc = tctx.script(tdata.path("../examples/addons/http-redirect-requests.py"))
             f = tflow.tflow(req=tutils.treq(host="example.org"))
             sc.request(f)
             assert f.request.host == "mitmproxy.org"
 
     def test_send_reply_from_proxy(self, tdata):
         with taddons.context() as tctx:
-            sc = tctx.script(tdata.path("../examples/simple/send_reply_from_proxy.py"))
+            sc = tctx.script(tdata.path("../examples/addons/http-reply-from-proxy.py"))
             f = tflow.tflow(req=tutils.treq(host="example.com", port=80))
             sc.request(f)
             assert f.response.content == b"Hello World"
-
-    def test_dns_spoofing(self, tdata):
-        with taddons.context() as tctx:
-            sc = tctx.script(tdata.path("../examples/complex/dns_spoofing.py"))
-
-            original_host = "example.com"
-
-            host_header = Headers(host=original_host)
-            f = tflow.tflow(req=tutils.treq(headers=host_header, port=80))
-
-            tctx.master.addons.invoke_addon(sc, "requestheaders", f)
-
-            # Rewrite by reverse proxy mode
-            f.request.scheme = "https"
-            f.request.port = 443
-
-            tctx.master.addons.invoke_addon(sc, "request", f)
-
-            assert f.request.scheme == "http"
-            assert f.request.port == 80
-
-            assert f.request.headers["Host"] == original_host

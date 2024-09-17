@@ -1,7 +1,14 @@
-import mitmproxy.master  # noqa
-import mitmproxy.log  # noqa
-import mitmproxy.options  # noqa
+from __future__ import annotations
 
-master = None  # type: mitmproxy.master.Master
-log: mitmproxy.log.Log = None
-options: mitmproxy.options.Options = None
+import typing
+
+if typing.TYPE_CHECKING:
+    import mitmproxy.log
+    import mitmproxy.master
+    import mitmproxy.options
+
+master: mitmproxy.master.Master
+options: mitmproxy.options.Options
+
+log: mitmproxy.log.Log
+"""Deprecated: Use Python's builtin `logging` module instead."""

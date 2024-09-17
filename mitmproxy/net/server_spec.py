@@ -1,13 +1,17 @@
 """
-Parse scheme, host and port from a string.
+Server specs are used to describe an upstream proxy or server.
 """
-import collections
+
 import re
-from typing import Tuple
+from functools import cache
+from typing import Literal
 
 from mitmproxy.net import check
 
-ServerSpec = collections.namedtuple("ServerSpec", ["scheme", "address"])
+ServerSpec = tuple[
+    Literal["http", "https", "http3", "tls", "dtls", "tcp", "udp", "dns", "quic"],
+    tuple[str, int],
+]
 
 server_spec_re = re.compile(
     r"""
@@ -18,59 +22,64 @@ server_spec_re = re.compile(
         /?  #  we allow a trailing backslash, but no path
         $
         """,
-    re.VERBOSE
+    re.VERBOSE,
 )
 
 
-def parse(server_spec: str) -> ServerSpec:
+@cache
+def parse(server_spec: str, default_scheme: str) -> ServerSpec:
     """
     Parses a server mode specification, e.g.:
 
-        - http://example.com/
-        - example.org
-        - example.com:443
+     - http://example.com/
+     - example.org
+     - example.com:443
 
-    Raises:
-        ValueError, if the server specification is invalid.
+    *Raises:*
+     - ValueError, if the server specification is invalid.
     """
     m = server_spec_re.match(server_spec)
     if not m:
-        raise ValueError("Invalid server specification: {}".format(server_spec))
+        raise ValueError(f"Invalid server specification: {server_spec}")
 
-    # defaulting to https/port 443 may annoy some folks, but it's secure-by-default.
-    scheme = m.group("scheme") or "https"
-    if scheme not in ("http", "https"):
-        raise ValueError("Invalid server scheme: {}".format(scheme))
+    if m.group("scheme"):
+        scheme = m.group("scheme")
+    else:
+        scheme = default_scheme
+    if scheme not in (
+        "http",
+        "https",
+        "http3",
+        "tls",
+        "dtls",
+        "tcp",
+        "udp",
+        "dns",
+        "quic",
+    ):
+        raise ValueError(f"Invalid server scheme: {scheme}")
 
     host = m.group("host")
     # IPv6 brackets
     if host.startswith("[") and host.endswith("]"):
         host = host[1:-1]
-    if not check.is_valid_host(host.encode("idna")):
-        raise ValueError("Invalid hostname: {}".format(host))
+    if not check.is_valid_host(host):
+        raise ValueError(f"Invalid hostname: {host}")
 
     if m.group("port"):
         port = int(m.group("port"))
     else:
-        port = {
-            "http": 80,
-            "https": 443
-        }[scheme]
+        try:
+            port = {
+                "http": 80,
+                "https": 443,
+                "quic": 443,
+                "http3": 443,
+                "dns": 53,
+            }[scheme]
+        except KeyError:
+            raise ValueError(f"Port specification missing.")
     if not check.is_valid_port(port):
-        raise ValueError("Invalid port: {}".format(port))
+        raise ValueError(f"Invalid port: {port}")
 
-    return ServerSpec(scheme, (host, port))
-
-
-def parse_with_mode(mode: str) -> Tuple[str, ServerSpec]:
-    """
-    Parse a proxy mode specification, which is usually just (reverse|upstream):server-spec
-
-    Returns:
-        A (mode, server_spec) tuple.
-
-    Raises:
-        ValueError, if the specification is invalid.
-    """
-    mode, server_spec = mode.split(":", maxsplit=1)
-    return mode, parse(server_spec)
+    return scheme, (host, port)  # type: ignore

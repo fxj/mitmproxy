@@ -1,8 +1,9 @@
+from typing import Any
+
 import urwid
-import typing
 
 from mitmproxy import exceptions
-from mitmproxy.net.http import Headers
+from mitmproxy.http import Headers
 from mitmproxy.tools.console import layoutwidget
 from mitmproxy.tools.console import signals
 from mitmproxy.tools.console.grideditor import base
@@ -14,10 +15,7 @@ from mitmproxy.tools.console.grideditor import col_viewany
 
 class QueryEditor(base.FocusEditor):
     title = "Edit Query"
-    columns = [
-        col_text.Column("Key"),
-        col_text.Column("Value")
-    ]
+    columns = [col_text.Column("Key"), col_text.Column("Value")]
 
     def get_data(self, flow):
         return flow.request.query.items(multi=True)
@@ -27,10 +25,7 @@ class QueryEditor(base.FocusEditor):
 
 
 class HeaderEditor(base.FocusEditor):
-    columns = [
-        col_bytes.Column("Key"),
-        col_bytes.Column("Value")
-    ]
+    columns = [col_bytes.Column("Key"), col_bytes.Column("Value")]
 
 
 class RequestHeaderEditor(HeaderEditor):
@@ -53,12 +48,20 @@ class ResponseHeaderEditor(HeaderEditor):
         flow.response.headers = Headers(vals)
 
 
-class RequestFormEditor(base.FocusEditor):
-    title = "Edit URL-encoded Form"
-    columns = [
-        col_text.Column("Key"),
-        col_text.Column("Value")
-    ]
+class RequestMultipartEditor(base.FocusEditor):
+    title = "Edit Multipart Form"
+    columns = [col_bytes.Column("Key"), col_bytes.Column("Value")]
+
+    def get_data(self, flow):
+        return flow.request.multipart_form.items(multi=True)
+
+    def set_data(self, vals, flow):
+        flow.request.multipart_form = vals
+
+
+class RequestUrlEncodedEditor(base.FocusEditor):
+    title = "Edit UrlEncoded Form"
+    columns = [col_text.Column("Key"), col_text.Column("Value")]
 
     def get_data(self, flow):
         return flow.request.urlencoded_form.items(multi=True)
@@ -107,7 +110,7 @@ class CookieAttributeEditor(base.FocusEditor):
         col_text.Column("Name"),
         col_text.Column("Value"),
     ]
-    grideditor: base.BaseGridEditor = None
+    grideditor: base.BaseGridEditor
 
     def data_in(self, data):
         return [(k, v or "") for k, v in data]
@@ -130,7 +133,7 @@ class CookieAttributeEditor(base.FocusEditor):
                 self.grideditor.walker.get_current_value(),
                 self.grideditor.set_subeditor_value,
                 self.grideditor.walker.focus,
-                self.grideditor.walker.focus_col
+                self.grideditor.walker.focus_col,
             )
         else:
             self._w = urwid.Pile([])
@@ -153,12 +156,7 @@ class SetCookieEditor(base.FocusEditor):
     def data_out(self, data):
         vals = []
         for key, value, attrs in data:
-            vals.append(
-                [
-                    key,
-                    (value, attrs)
-                ]
-            )
+            vals.append([key, (value, attrs)])
         return vals
 
     def get_data(self, flow):
@@ -169,16 +167,14 @@ class SetCookieEditor(base.FocusEditor):
 
 
 class OptionsEditor(base.GridEditor, layoutwidget.LayoutWidget):
-    title: str = None
-    columns = [
-        col_text.Column("")
-    ]
+    title = ""
+    columns = [col_text.Column("")]
 
     def __init__(self, master, name, vals):
         self.name = name
         super().__init__(master, [[i] for i in vals], self.callback)
 
-    def callback(self, vals):
+    def callback(self, vals) -> None:
         try:
             setattr(self.master.options, self.name, [i[0] for i in vals])
         except exceptions.OptionsError as v:
@@ -189,19 +185,16 @@ class OptionsEditor(base.GridEditor, layoutwidget.LayoutWidget):
 
 
 class DataViewer(base.GridEditor, layoutwidget.LayoutWidget):
-    title: str = None
+    title = ""
 
     def __init__(
-            self,
-            master,
-            vals: typing.Union[
-                typing.List[typing.List[typing.Any]],
-                typing.List[typing.Any],
-                str,
-            ]) -> None:
-        if vals:
+        self,
+        master,
+        vals: (list[list[Any]] | list[Any] | Any),
+    ) -> None:
+        if vals is not None:
             # Whatever vals is, make it a list of rows containing lists of column values.
-            if isinstance(vals, str):
+            if not isinstance(vals, list):
                 vals = [vals]
             if not isinstance(vals[0], list):
                 vals = [[i] for i in vals]

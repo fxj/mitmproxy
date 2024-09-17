@@ -1,5 +1,8 @@
+"""Add a custom command to mitmproxy's command prompt."""
+
+import logging
+
 from mitmproxy import command
-from mitmproxy import ctx
 
 
 class MyAddon:
@@ -9,9 +12,7 @@ class MyAddon:
     @command.command("myaddon.inc")
     def inc(self) -> None:
         self.num += 1
-        ctx.log.info("num = %s" % self.num)
+        logging.info(f"num = {self.num}")
 
 
-addons = [
-    MyAddon()
-]
+addons = [MyAddon()]

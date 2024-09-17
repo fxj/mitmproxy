@@ -1,13 +1,15 @@
-import typing
 import inspect
-from mitmproxy import command
-from mitmproxy import flow
-from mitmproxy import exceptions
-from mitmproxy.test import tflow
-from mitmproxy.test import taddons
-import mitmproxy.types
 import io
+from collections.abc import Sequence
+
 import pytest
+
+import mitmproxy.types
+from mitmproxy import command
+from mitmproxy import exceptions
+from mitmproxy import flow
+from mitmproxy.test import taddons
+from mitmproxy.test import tflow
 
 
 class TAddon:
@@ -29,7 +31,9 @@ class TAddon:
         return "ok"
 
     @command.command("subcommand")
-    def subcommand(self, cmd: mitmproxy.types.Cmd, *args: mitmproxy.types.Arg) -> str:
+    def subcommand(
+        self, cmd: mitmproxy.types.Cmd, *args: mitmproxy.types.CmdArgs
+    ) -> str:
         return "ok"
 
     @command.command("empty")
@@ -37,14 +41,14 @@ class TAddon:
         pass
 
     @command.command("varargs")
-    def varargs(self, one: str, *var: str) -> typing.Sequence[str]:
+    def varargs(self, one: str, *var: str) -> Sequence[str]:
         return list(var)
 
-    def choices(self) -> typing.Sequence[str]:
+    def choices(self) -> Sequence[str]:
         return ["one", "two", "three"]
 
     @command.argument("arg", type=mitmproxy.types.Choice("choices"))
-    def choose(self, arg: str) -> typing.Sequence[str]:
+    def choose(self, arg: str) -> Sequence[str]:
         return ["one", "two", "three"]
 
     @command.command("path")
@@ -83,17 +87,15 @@ class TestCommand:
             with pytest.raises(exceptions.CommandError):
                 command.Command(cm, "invalidret", a.invalidret)
             with pytest.raises(exceptions.CommandError):
-                command.Command(cm, "invalidarg", a.invalidarg)
+                assert command.Command(cm, "invalidarg", a.invalidarg)
 
     def test_varargs(self):
         with taddons.context() as tctx:
             cm = command.CommandManager(tctx.master)
             a = TAddon()
             c = command.Command(cm, "varargs", a.varargs)
-            assert c.signature_help() == "varargs str *str -> [str]"
+            assert c.signature_help() == "varargs one *var -> str[]"
             assert c.call(["one", "two", "three"]) == ["two", "three"]
-            with pytest.raises(exceptions.CommandError):
-                c.call(["one", "two", 3])
 
     def test_call(self):
         with taddons.context() as tctx:
@@ -101,7 +103,7 @@ class TestCommand:
             a = TAddon()
             c = command.Command(cm, "cmd.path", a.cmd1)
             assert c.call(["foo"]) == "ret foo"
-            assert c.signature_help() == "cmd.path str -> str"
+            assert c.signature_help() == "cmd.path foo -> str"
 
             c = command.Command(cm, "cmd.two", a.cmd2)
             with pytest.raises(exceptions.CommandError):
@@ -116,153 +118,433 @@ class TestCommand:
                 "foo bar",
                 [
                     command.ParseResult(
-                        value = "foo", type = mitmproxy.types.Cmd, valid = False
+                        value="foo", type=mitmproxy.types.Cmd, valid=False
                     ),
                     command.ParseResult(
-                        value = "bar", type = mitmproxy.types.Unknown, valid = False
-                    )
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value="bar", type=mitmproxy.types.Unknown, valid=False
+                    ),
                 ],
                 [],
             ],
             [
                 "cmd1 'bar",
                 [
-                    command.ParseResult(value = "cmd1", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "'bar", type = str, valid = True)
+                    command.ParseResult(
+                        value="cmd1", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(value="'bar", type=str, valid=True),
                 ],
                 [],
             ],
             [
                 "a",
-                [command.ParseResult(value = "a", type = mitmproxy.types.Cmd, valid = False)],
+                [command.ParseResult(value="a", type=mitmproxy.types.Cmd, valid=False)],
                 [],
             ],
             [
                 "",
-                [command.ParseResult(value = "", type = mitmproxy.types.Cmd, valid = False)],
-                []
+                [],
+                [
+                    command.CommandParameter("", mitmproxy.types.Cmd),
+                    command.CommandParameter("", mitmproxy.types.CmdArgs),
+                ],
             ],
             [
                 "cmd3 1",
                 [
-                    command.ParseResult(value = "cmd3", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "1", type = int, valid = True),
+                    command.ParseResult(
+                        value="cmd3", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(value="1", type=int, valid=True),
                 ],
-                []
+                [],
             ],
             [
                 "cmd3 ",
                 [
-                    command.ParseResult(value = "cmd3", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "", type = int, valid = False),
+                    command.ParseResult(
+                        value="cmd3", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
                 ],
-                []
+                [command.CommandParameter("foo", int)],
             ],
             [
                 "subcommand ",
                 [
                     command.ParseResult(
-                        value = "subcommand", type = mitmproxy.types.Cmd, valid = True,
+                        value="subcommand",
+                        type=mitmproxy.types.Cmd,
+                        valid=True,
                     ),
-                    command.ParseResult(value = "", type = mitmproxy.types.Cmd, valid = False),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
                 ],
-                ["arg"],
+                [
+                    command.CommandParameter("cmd", mitmproxy.types.Cmd),
+                    command.CommandParameter(
+                        "args",
+                        mitmproxy.types.CmdArgs,
+                        kind=inspect.Parameter.VAR_POSITIONAL,
+                    ),
+                ],
+            ],
+            [
+                "varargs one",
+                [
+                    command.ParseResult(
+                        value="varargs", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(value="one", type=str, valid=True),
+                ],
+                [
+                    command.CommandParameter(
+                        "var", str, kind=inspect.Parameter.VAR_POSITIONAL
+                    )
+                ],
+            ],
+            [
+                "varargs one two three",
+                [
+                    command.ParseResult(
+                        value="varargs", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(value="one", type=str, valid=True),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(value="two", type=str, valid=True),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(value="three", type=str, valid=True),
+                ],
+                [],
             ],
             [
                 "subcommand cmd3 ",
                 [
-                    command.ParseResult(value = "subcommand", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "cmd3", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "", type = int, valid = False),
+                    command.ParseResult(
+                        value="subcommand", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value="cmd3", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
                 ],
-                []
+                [command.CommandParameter("foo", int)],
             ],
             [
                 "cmd4",
                 [
-                    command.ParseResult(value = "cmd4", type = mitmproxy.types.Cmd, valid = True),
+                    command.ParseResult(
+                        value="cmd4", type=mitmproxy.types.Cmd, valid=True
+                    ),
                 ],
-                ["int", "str", "path"]
+                [
+                    command.CommandParameter("a", int),
+                    command.CommandParameter("b", str),
+                    command.CommandParameter("c", mitmproxy.types.Path),
+                ],
             ],
             [
                 "cmd4 ",
                 [
-                    command.ParseResult(value = "cmd4", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "", type = int, valid = False),
+                    command.ParseResult(
+                        value="cmd4", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
                 ],
-                ["str", "path"]
+                [
+                    command.CommandParameter("a", int),
+                    command.CommandParameter("b", str),
+                    command.CommandParameter("c", mitmproxy.types.Path),
+                ],
             ],
             [
                 "cmd4 1",
                 [
-                    command.ParseResult(value = "cmd4", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "1", type = int, valid = True),
+                    command.ParseResult(
+                        value="cmd4", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(value="1", type=int, valid=True),
                 ],
-                ["str", "path"]
-            ],
-            [
-                "cmd4 1",
                 [
-                    command.ParseResult(value = "cmd4", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "1", type = int, valid = True),
+                    command.CommandParameter("b", str),
+                    command.CommandParameter("c", mitmproxy.types.Path),
                 ],
-                ["str", "path"]
             ],
             [
                 "flow",
                 [
-                    command.ParseResult(value = "flow", type = mitmproxy.types.Cmd, valid = True),
+                    command.ParseResult(
+                        value="flow", type=mitmproxy.types.Cmd, valid=True
+                    ),
                 ],
-                ["flow", "str"]
+                [
+                    command.CommandParameter("f", flow.Flow),
+                    command.CommandParameter("s", str),
+                ],
             ],
             [
                 "flow ",
                 [
-                    command.ParseResult(value = "flow", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "", type = flow.Flow, valid = False),
+                    command.ParseResult(
+                        value="flow", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
                 ],
-                ["str"]
+                [
+                    command.CommandParameter("f", flow.Flow),
+                    command.CommandParameter("s", str),
+                ],
             ],
             [
                 "flow x",
                 [
-                    command.ParseResult(value = "flow", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "x", type = flow.Flow, valid = False),
+                    command.ParseResult(
+                        value="flow", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(value="x", type=flow.Flow, valid=False),
                 ],
-                ["str"]
+                [
+                    command.CommandParameter("s", str),
+                ],
             ],
             [
                 "flow x ",
                 [
-                    command.ParseResult(value = "flow", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "x", type = flow.Flow, valid = False),
-                    command.ParseResult(value = "", type = str, valid = True),
+                    command.ParseResult(
+                        value="flow", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(value="x", type=flow.Flow, valid=False),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
                 ],
-                []
+                [
+                    command.CommandParameter("s", str),
+                ],
             ],
             [
-                "flow \"one two",
+                'flow "one two',
                 [
-                    command.ParseResult(value = "flow", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "\"one two", type = flow.Flow, valid = False),
+                    command.ParseResult(
+                        value="flow", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(value='"one two', type=flow.Flow, valid=False),
                 ],
-                ["str"]
+                [
+                    command.CommandParameter("s", str),
+                ],
             ],
             [
-                "flow \"one two\"",
+                'flow "three four"',
                 [
-                    command.ParseResult(value = "flow", type = mitmproxy.types.Cmd, valid = True),
-                    command.ParseResult(value = "one two", type = flow.Flow, valid = False),
+                    command.ParseResult(
+                        value="flow", type=mitmproxy.types.Cmd, valid=True
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value='"three four"', type=flow.Flow, valid=False
+                    ),
                 ],
-                ["str"]
+                [
+                    command.CommandParameter("s", str),
+                ],
+            ],
+            [
+                "spaces '    '",
+                [
+                    command.ParseResult(
+                        value="spaces", type=mitmproxy.types.Cmd, valid=False
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value="'    '", type=mitmproxy.types.Unknown, valid=False
+                    ),
+                ],
+                [],
+            ],
+            [
+                'spaces2 "    "',
+                [
+                    command.ParseResult(
+                        value="spaces2", type=mitmproxy.types.Cmd, valid=False
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value='"    "', type=mitmproxy.types.Unknown, valid=False
+                    ),
+                ],
+                [],
+            ],
+            [
+                '"abc"',
+                [
+                    command.ParseResult(
+                        value='"abc"', type=mitmproxy.types.Cmd, valid=False
+                    ),
+                ],
+                [],
+            ],
+            [
+                "'def'",
+                [
+                    command.ParseResult(
+                        value="'def'", type=mitmproxy.types.Cmd, valid=False
+                    ),
+                ],
+                [],
+            ],
+            [
+                "cmd10 'a' \"b\" c",
+                [
+                    command.ParseResult(
+                        value="cmd10", type=mitmproxy.types.Cmd, valid=False
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value="'a'", type=mitmproxy.types.Unknown, valid=False
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value='"b"', type=mitmproxy.types.Unknown, valid=False
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value="c", type=mitmproxy.types.Unknown, valid=False
+                    ),
+                ],
+                [],
+            ],
+            [
+                "cmd11 'a \"b\" c'",
+                [
+                    command.ParseResult(
+                        value="cmd11", type=mitmproxy.types.Cmd, valid=False
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value="'a \"b\" c'", type=mitmproxy.types.Unknown, valid=False
+                    ),
+                ],
+                [],
+            ],
+            [
+                "cmd12 \"a 'b' c\"",
+                [
+                    command.ParseResult(
+                        value="cmd12", type=mitmproxy.types.Cmd, valid=False
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value="\"a 'b' c\"", type=mitmproxy.types.Unknown, valid=False
+                    ),
+                ],
+                [],
+            ],
+            [
+                "    spaces_at_the_begining_are_not_stripped",
+                [
+                    command.ParseResult(
+                        value="    ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value="spaces_at_the_begining_are_not_stripped",
+                        type=mitmproxy.types.Cmd,
+                        valid=False,
+                    ),
+                ],
+                [],
+            ],
+            [
+                "    spaces_at_the_begining_are_not_stripped neither_at_the_end      ",
+                [
+                    command.ParseResult(
+                        value="    ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value="spaces_at_the_begining_are_not_stripped",
+                        type=mitmproxy.types.Cmd,
+                        valid=False,
+                    ),
+                    command.ParseResult(
+                        value=" ", type=mitmproxy.types.Space, valid=True
+                    ),
+                    command.ParseResult(
+                        value="neither_at_the_end",
+                        type=mitmproxy.types.Unknown,
+                        valid=False,
+                    ),
+                    command.ParseResult(
+                        value="      ", type=mitmproxy.types.Space, valid=True
+                    ),
+                ],
+                [],
             ],
         ]
+
         with taddons.context() as tctx:
             tctx.master.addons.add(TAddon())
             for s, expected, expectedremain in tests:
                 current, remain = tctx.master.commands.parse_partial(s)
-                assert current == expected
-                assert expectedremain == remain
+                assert (s, current, expectedremain) == (s, expected, remain)
 
 
 def test_simple():
@@ -271,8 +553,10 @@ def test_simple():
         a = TAddon()
         c.add("one.two", a.cmd1)
         assert c.commands["one.two"].help == "cmd1 help"
-        assert(c.execute("one.two foo") == "ret foo")
-        assert(c.call("one.two", "foo") == "ret foo")
+        assert c.execute("one.two foo") == "ret foo"
+        assert c.execute('one.two "foo"') == "ret foo"
+        assert c.execute("one.two 'foo bar'") == "ret foo bar"
+        assert c.call("one.two", "foo") == "ret foo"
         with pytest.raises(exceptions.CommandError, match="Unknown"):
             c.execute("nonexistent")
         with pytest.raises(exceptions.CommandError, match="Invalid"):
@@ -281,7 +565,7 @@ def test_simple():
             c.execute("one.two too many args")
         with pytest.raises(exceptions.CommandError, match="Unknown"):
             c.call("nonexistent")
-        with pytest.raises(exceptions.CommandError, match="No escaped"):
+        with pytest.raises(exceptions.CommandError, match="Unknown"):
             c.execute("\\")
 
         c.add("empty", a.empty)
@@ -294,13 +578,13 @@ def test_simple():
 
 def test_typename():
     assert command.typename(str) == "str"
-    assert command.typename(typing.Sequence[flow.Flow]) == "[flow]"
+    assert command.typename(Sequence[flow.Flow]) == "flow[]"
 
-    assert command.typename(mitmproxy.types.Data) == "[data]"
-    assert command.typename(mitmproxy.types.CutSpec) == "[cut]"
+    assert command.typename(mitmproxy.types.Data) == "data[][]"
+    assert command.typename(mitmproxy.types.CutSpec) == "cut[]"
 
     assert command.typename(flow.Flow) == "flow"
-    assert command.typename(typing.Sequence[str]) == "[str]"
+    assert command.typename(Sequence[str]) == "str[]"
 
     assert command.typename(mitmproxy.types.Choice("foo")) == "choice"
     assert command.typename(mitmproxy.types.Path) == "path"
@@ -314,7 +598,7 @@ def test_typename():
 
 class DummyConsole:
     @command.command("view.flows.resolve")
-    def resolve(self, spec: str) -> typing.Sequence[flow.Flow]:
+    def resolve(self, spec: str) -> Sequence[flow.Flow]:
         n = int(spec)
         return [tflow.tflow(resp=True)] * n
 
@@ -350,22 +634,28 @@ class TDec:
 
 class TAttr:
     def __getattr__(self, item):
-        raise IOError
+        raise OSError
+
+
+class TAttr2:
+    def __getattr__(self, item):
+        return TAttr2()
 
 
 class TCmds(TAttr):
     def __init__(self):
         self.TAttr = TAttr()
+        self.TAttr2 = TAttr2()
 
     @command.command("empty")
     def empty(self) -> None:
         pass
 
 
-@pytest.mark.asyncio
-async def test_collect_commands():
+async def test_collect_commands(caplog):
     """
-        This tests for the error thrown by hasattr()
+    This tests for errors thrown by getattr() or __getattr__ implementations
+    that return an object for .command_name.
     """
     with taddons.context() as tctx:
         c = command.CommandManager(tctx.master)
@@ -375,7 +665,7 @@ async def test_collect_commands():
 
         a = TypeErrAddon()
         c.collect_commands(a)
-        await tctx.master.await_log("Could not load")
+        assert "Could not load" in caplog.text
 
 
 def test_decorator():
@@ -396,5 +686,5 @@ def test_decorator():
 def test_verify_arg_signature():
     with pytest.raises(exceptions.CommandError):
         command.verify_arg_signature(lambda: None, [1, 2], {})
-        print('hello there')
+        print("hello there")
     command.verify_arg_signature(lambda a, b: None, [1, 2], {})

@@ -1,12 +1,12 @@
-import mitmproxy.net.http.url
-from mitmproxy import exceptions
-
-
 def assemble_request(request):
     if request.data.content is None:
-        raise exceptions.HttpException("Cannot assemble flow with missing content")
+        raise ValueError("Cannot assemble flow with missing content")
     head = assemble_request_head(request)
-    body = b"".join(assemble_body(request.data.headers, [request.data.content]))
+    body = b"".join(
+        assemble_body(
+            request.data.headers, [request.data.content], request.data.trailers
+        )
+    )
     return head + body
 
 
@@ -18,9 +18,13 @@ def assemble_request_head(request):
 
 def assemble_response(response):
     if response.data.content is None:
-        raise exceptions.HttpException("Cannot assemble flow with missing content")
+        raise ValueError("Cannot assemble flow with missing content")
     head = assemble_response_head(response)
-    body = b"".join(assemble_body(response.data.headers, [response.data.content]))
+    body = b"".join(
+        assemble_body(
+            response.data.headers, [response.data.content], response.data.trailers
+        )
+    )
     return head + body
 
 
@@ -30,13 +34,20 @@ def assemble_response_head(response):
     return b"%s\r\n%s\r\n" % (first_line, headers)
 
 
-def assemble_body(headers, body_chunks):
+def assemble_body(headers, body_chunks, trailers):
     if "chunked" in headers.get("transfer-encoding", "").lower():
         for chunk in body_chunks:
             if chunk:
                 yield b"%x\r\n%s\r\n" % (len(chunk), chunk)
-        yield b"0\r\n\r\n"
+        if trailers:
+            yield b"0\r\n%s\r\n" % trailers
+        else:
+            yield b"0\r\n\r\n"
     else:
+        if trailers:
+            raise ValueError(
+                "Sending HTTP/1.1 trailer headers requires transfer-encoding: chunked"
+            )
         for chunk in body_chunks:
             yield chunk
 
@@ -46,31 +57,26 @@ def _assemble_request_line(request_data):
     Args:
         request_data (mitmproxy.net.http.request.RequestData)
     """
-    form = request_data.first_line_format
-    if form == "relative":
+    if request_data.method.upper() == b"CONNECT":
+        return b"%s %s %s" % (
+            request_data.method,
+            request_data.authority,
+            request_data.http_version,
+        )
+    elif request_data.authority:
+        return b"%s %s://%s%s %s" % (
+            request_data.method,
+            request_data.scheme,
+            request_data.authority,
+            request_data.path,
+            request_data.http_version,
+        )
+    else:
         return b"%s %s %s" % (
             request_data.method,
             request_data.path,
-            request_data.http_version
+            request_data.http_version,
         )
-    elif form == "authority":
-        return b"%s %s:%d %s" % (
-            request_data.method,
-            request_data.host,
-            request_data.port,
-            request_data.http_version
-        )
-    elif form == "absolute":
-        return b"%s %s://%s:%d%s %s" % (
-            request_data.method,
-            request_data.scheme,
-            request_data.host,
-            request_data.port,
-            request_data.path,
-            request_data.http_version
-        )
-    else:
-        raise RuntimeError("Invalid request form")
 
 
 def _assemble_request_headers(request_data):
@@ -78,15 +84,7 @@ def _assemble_request_headers(request_data):
     Args:
         request_data (mitmproxy.net.http.request.RequestData)
     """
-    headers = request_data.headers
-    if "host" not in headers and request_data.scheme and request_data.host and request_data.port:
-        headers = headers.copy()
-        headers["host"] = mitmproxy.net.http.url.hostport(
-            request_data.scheme,
-            request_data.host,
-            request_data.port
-        )
-    return bytes(headers)
+    return bytes(request_data.headers)
 
 
 def _assemble_response_line(response_data):

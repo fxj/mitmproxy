@@ -1,4 +1,10 @@
-from mitmproxy import ctx
+"""
+Basic skeleton of a mitmproxy addon.
+
+Run as follows: mitmproxy -s anatomy.py
+"""
+
+import logging
 
 
 class Counter:
@@ -7,9 +13,7 @@ class Counter:
 
     def request(self, flow):
         self.num = self.num + 1
-        ctx.log.info("We've seen %d flows" % self.num)
+        logging.info("We've seen %d flows" % self.num)
 
 
-addons = [
-    Counter()
-]
+addons = [Counter()]

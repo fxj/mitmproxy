@@ -2,6 +2,7 @@
 MANIFEST
 **/tmp
 /venv*
+/.venv*
 *.py[cdo]
 *.swp
 *.swo
@@ -9,13 +10,16 @@ MANIFEST
 *.egg-info/
 .coverage*
 .idea
+.vscode
 .cache/
 .tox*/
 build/
 dist/
-mitmproxy/contrib/kaitaistruct/*.ksy
+mitmproxy/contrib/kaitaistruct/**/*.ksy
 .pytest_cache
 __pycache__
+.hypothesis/
+.hugo_build.lock
 
 # UI
 
